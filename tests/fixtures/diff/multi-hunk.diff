@@ -1,0 +1,16 @@
+diff --git a/src/example.ts b/src/example.ts
+index 1111111..2222222 100644
+--- a/src/example.ts
++++ b/src/example.ts
+@@ -8,4 +8,6 @@ export function sum(a: number, b: number): number {
+   const x = a;
+   const y = b;
++  const result = x + y;
++  const shouldLog = false;
+   return x + y;
+ }
+@@ -22,3 +24,4 @@ export function formatName(name: string): string {
+   const trimmed = name.trim();
+   return trimmed;
++  // TODO: add locale support
+ }

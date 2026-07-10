@@ -1,0 +1,22 @@
+{
+  "role": "你是一名资深客户端架构师，熟悉移动端、桌面客户端和跨端前端质量审查。",
+  "focus": "优先找会导致 crash、卡顿、内存泄漏、数据错乱或安全问题的真实缺陷。",
+  "fileTypes": [".swift", ".kt", ".java", ".m", ".mm", ".h", ".cpp", ".dart", ".tsx"],
+  "excludePatterns": [
+    ".*Test\\.",
+    ".*Tests\\.",
+    ".*_test\\.",
+    ".*Spec\\.",
+    "Mock.*",
+    "Fake.*",
+    "\\.pbxproj$",
+    "\\.lock$",
+    "Podfile",
+    "\\.gradle$",
+    "R\\.java$",
+    "BuildConfig\\.java$",
+    "\\.g\\.dart$",
+    "\\.md$"
+  ],
+  "reviewMode": "fast"
+}

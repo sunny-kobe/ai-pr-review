@@ -1,0 +1,18 @@
+{
+  "role": "你是一名高级后端架构师，熟悉服务端稳定性、安全性和数据一致性审查。",
+  "focus": "优先找会导致接口错误、数据不一致、权限绕过、安全漏洞或性能事故的真实缺陷。",
+  "fileTypes": [".go", ".py", ".java", ".kt", ".rs", ".rb", ".php", ".cs"],
+  "excludePatterns": [
+    "_test\\.go$",
+    "test_.*\\.py$",
+    ".*Test\\.java$",
+    ".*_test\\.rs$",
+    "\\.spec\\.",
+    "mock_",
+    "fixture",
+    "\\.md$",
+    "go\\.sum$",
+    "Cargo\\.lock$"
+  ],
+  "reviewMode": "full"
+}

@@ -1,0 +1,239 @@
+name: 'AI PR Review'
+description: 'Evidence-focused AI code review for pull requests using OpenAI-compatible APIs or Gemini CLI'
+author: 'sunny-kobe'
+
+branding:
+  icon: 'code'
+  color: 'blue'
+
+inputs:
+  gemini_api_key:
+    description: 'Google Gemini API Key'
+    required: false
+    default: ''
+
+  ai_provider:
+    description: 'AI provider: openai or gemini-cli (legacy fallback)'
+    required: false
+    default: 'openai'
+
+  openai_api_key:
+    description: 'OpenAI-compatible API key'
+    required: false
+    default: ''
+
+  openai_base_url:
+    description: 'OpenAI-compatible API base URL'
+    required: false
+    default: 'https://api.openai.com'
+
+  openai_model:
+    description: 'OpenAI-compatible model name'
+    required: false
+    default: 'gpt-5.6-luna'
+
+  openai_api_path:
+    description: 'OpenAI-compatible API path'
+    required: false
+    default: '/v1/chat/completions'
+
+  openai_response_format:
+    description: 'OpenAI response format: empty, json_object, or json_schema'
+    required: false
+    default: 'json_object'
+
+  openai_reasoning_effort:
+    description: 'Optional reasoning effort for Responses-compatible reasoning models, for example low, medium, high'
+    required: false
+    default: ''
+
+  pr_number:
+    description: 'Pull Request number to review'
+    required: false
+    default: ${{ github.event.pull_request.number }}
+
+  github_token:
+    description: 'GitHub token for API access'
+    required: false
+    default: ${{ github.token }}
+
+  preset:
+    description: 'Built-in preset: frontend, backend, mobile (overrides default settings)'
+    required: false
+    default: ''
+
+  config_file:
+    description: 'Path to custom config file (overrides preset)'
+    required: false
+    default: ''
+
+  # Behavior settings
+  batch_size:
+    description: 'Number of files per batch'
+    required: false
+    default: '5'
+
+  max_diff_lines:
+    description: 'Maximum diff lines per file before skipping'
+    required: false
+    default: '500'
+
+  context_lines:
+    description: 'Lines of context around changes'
+    required: false
+    default: '5'
+
+  debug_mode:
+    description: 'Enable debug logging'
+    required: false
+    default: 'false'
+
+  dry_run:
+    description: 'Run review analysis without writing summary or inline comments to GitHub'
+    required: false
+    default: 'false'
+
+  review_filter_enabled:
+    description: 'Enable optional second-pass filtering for inline comments'
+    required: false
+    default: 'false'
+
+  # Review rules
+  reviewer_role:
+    description: 'AI reviewer role description'
+    required: false
+    default: '你是一名高级代码审查专家，专注于正确性、安全性、可靠性和性能回归。'
+
+  reviewer_focus:
+    description: 'Review focus areas'
+    required: false
+    default: '重点关注与当前 diff 直接相关的正确性、安全、可靠性和性能回归；只有存在明确证据链时才提出可维护性建议。'
+
+  file_types:
+    description: 'File extensions to review (pipe-separated)'
+    required: false
+    default: '.ts|.tsx|.js|.jsx'
+
+  exclude_patterns:
+    description: 'Patterns to exclude (pipe-separated regex)'
+    required: false
+    default: '\.test\.|\.spec\.|__tests__'
+
+  language:
+    description: 'Output language for review comments (zh-CN or en)'
+    required: false
+    default: 'zh-CN'
+
+  review_mode:
+    description: 'Review mode: fast, full, or security'
+    required: false
+    default: 'fast'
+
+  skip_draft:
+    description: 'Skip review for draft pull requests'
+    required: false
+    default: 'true'
+
+  inline_severity_threshold:
+    description: 'Minimum severity for inline comments: low, medium, high, critical'
+    required: false
+    default: 'high'
+
+  inline_per_file_limit:
+    description: 'Maximum inline comments per file'
+    required: false
+    default: '2'
+
+  inline_pr_limit:
+    description: 'Maximum inline comments per pull request'
+    required: false
+    default: '8'
+
+outputs:
+  review_summary:
+    description: 'Summary of the review results'
+    value: ${{ steps.review.outputs.summary }}
+
+  files_reviewed:
+    description: 'Number of files reviewed'
+    value: ${{ steps.review.outputs.files_reviewed }}
+
+  files_skipped:
+    description: 'Number of files skipped'
+    value: ${{ steps.review.outputs.files_skipped }}
+
+  issues_found:
+    description: 'Total issues found'
+    value: ${{ steps.review.outputs.issues_found }}
+
+  critical_count:
+    description: 'Number of critical issues'
+    value: ${{ steps.review.outputs.critical_count }}
+
+  high_count:
+    description: 'Number of high priority issues'
+    value: ${{ steps.review.outputs.high_count }}
+
+  duplicate_comments_suppressed:
+    description: 'Number of duplicate comments suppressed'
+    value: ${{ steps.review.outputs.duplicate_comments_suppressed }}
+
+  redacted_matches:
+    description: 'Number of sensitive matches redacted before prompt assembly'
+    value: ${{ steps.review.outputs.redacted_matches }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Setup Node.js'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: 'Install Gemini CLI'
+      if: ${{ inputs.ai_provider == 'gemini-cli' }}
+      shell: bash
+      run: |
+        if ! command -v gemini &> /dev/null; then
+          echo "Installing Gemini CLI..."
+          npm install -g @google/gemini-cli
+        else
+          echo "Gemini CLI already installed"
+        fi
+
+    - name: 'Run AI PR Review'
+      id: review
+      shell: bash
+      env:
+        AI_PROVIDER: ${{ inputs.ai_provider }}
+        GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
+        GEMINI_CLI_TRUST_WORKSPACE: 'true'
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        OPENAI_BASE_URL: ${{ inputs.openai_base_url }}
+        OPENAI_MODEL: ${{ inputs.openai_model }}
+        OPENAI_API_PATH: ${{ inputs.openai_api_path }}
+        OPENAI_RESPONSE_FORMAT: ${{ inputs.openai_response_format }}
+        OPENAI_REASONING_EFFORT: ${{ inputs.openai_reasoning_effort }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        PRESET: ${{ inputs.preset }}
+        PRESET_DIR: ${{ github.action_path }}/presets
+        CONFIG_FILE: ${{ inputs.config_file }}
+        BATCH_SIZE: ${{ inputs.batch_size }}
+        MAX_DIFF_LINES: ${{ inputs.max_diff_lines }}
+        CONTEXT_LINES: ${{ inputs.context_lines }}
+        DEBUG_MODE: ${{ inputs.debug_mode }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        REVIEW_FILTER_ENABLED: ${{ inputs.review_filter_enabled }}
+        REVIEWER_ROLE: ${{ inputs.reviewer_role }}
+        REVIEWER_FOCUS: ${{ inputs.reviewer_focus }}
+        FILE_TYPES: ${{ inputs.file_types }}
+        EXCLUDE_PATTERNS: ${{ inputs.exclude_patterns }}
+        LANGUAGE: ${{ inputs.language }}
+        REVIEW_MODE: ${{ inputs.review_mode }}
+        SKIP_DRAFT: ${{ inputs.skip_draft }}
+        INLINE_SEVERITY_THRESHOLD: ${{ inputs.inline_severity_threshold }}
+        INLINE_PER_FILE_LIMIT: ${{ inputs.inline_per_file_limit }}
+        INLINE_PR_LIMIT: ${{ inputs.inline_pr_limit }}
+      run: |
+        bash "${{ github.action_path }}/scripts/run_review.sh"

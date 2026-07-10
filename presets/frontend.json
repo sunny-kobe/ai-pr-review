@@ -1,0 +1,15 @@
+{
+  "role": "你是一名高级前端架构师，熟悉 React/Vue、业务中后台和 H5 活动页。",
+  "focus": "优先找会导致页面崩溃、数据错误、权限/安全问题或明显性能退化的真实缺陷。",
+  "fileTypes": [".ts", ".tsx", ".js", ".jsx", ".vue"],
+  "excludePatterns": [
+    "\\.test\\.",
+    "\\.spec\\.",
+    "__tests__",
+    "\\.d\\.ts$",
+    "\\.md$",
+    "package\\.json",
+    "\\.config\\."
+  ],
+  "reviewMode": "fast"
+}

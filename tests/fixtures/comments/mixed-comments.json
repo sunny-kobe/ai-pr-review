@@ -1,0 +1,26 @@
+[
+  {
+    "file": "src/with-context.ts",
+    "line": 8,
+    "severity": "high",
+    "message": "first valid finding"
+  },
+  {
+    "file": "src/with-context.ts",
+    "line": 8,
+    "severity": "medium",
+    "message": "second valid finding"
+  },
+  {
+    "file": "src/with-context.ts",
+    "line": 7,
+    "severity": "low",
+    "message": "invalid: unchanged context line"
+  },
+  {
+    "file": "src/other.ts",
+    "line": 9,
+    "severity": "high",
+    "message": "invalid: wrong file"
+  }
+]

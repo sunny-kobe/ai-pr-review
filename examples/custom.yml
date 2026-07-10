@@ -1,0 +1,22 @@
+name: AI Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: sunny-kobe/ai-pr-review@v1
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          openai_base_url: ${{ vars.OPENAI_BASE_URL }}
+          openai_model: gpt-5.6-luna
+          config_file: .github/ai-review-config.json

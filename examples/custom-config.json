@@ -1,0 +1,9 @@
+{
+  "role": "你是一名高级全栈工程师，熟悉 React + Node.js 技术栈。",
+  "focus": "优先找 API 调用安全性、错误处理、数据错误和明显性能问题。",
+  "fileTypes": [".ts", ".tsx", ".js", ".jsx"],
+  "excludePatterns": ["\\.test\\.", "\\.spec\\.", "__tests__", "\\.stories\\.", "\\.mock\\."],
+  "reviewMode": "full",
+  "inlineSeverityThreshold": "medium",
+  "maxDiffLines": 400
+}

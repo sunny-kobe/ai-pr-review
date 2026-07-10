@@ -1,0 +1,12 @@
+diff --git a/src/with-context.ts b/src/with-context.ts
+index 3333333..4444444 100644
+--- a/src/with-context.ts
++++ b/src/with-context.ts
+@@ -5,6 +5,7 @@ export function loadData(id: string) {
+   if (!id) {
+     return null;
+   }
++  const cacheKey = `data:${id}`;
+   const value = fetchValue(id);
+   return value;
+ }
