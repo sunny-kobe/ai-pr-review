@@ -1,0 +1,3 @@
+const token = "ghp_1234567890abcdefghijklmnopqrstuvwxyz";
+const apiKey = "my-plain-secret";
+const password = "super-secret-password";

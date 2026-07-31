@@ -244,7 +244,7 @@ function buildReviewFilterProvider() {
         model: process.env.OPENAI_MODEL || 'gpt-5.6-luna',
         responseFormat: process.env.OPENAI_RESPONSE_FORMAT || '',
         reasoningEffort: process.env.OPENAI_REASONING_EFFORT || '',
-      }, REVIEW_FILTER_SYSTEM_PROMPT),
+      }, REVIEW_FILTER_SYSTEM_PROMPT, 'review_filter'),
     );
   }
 

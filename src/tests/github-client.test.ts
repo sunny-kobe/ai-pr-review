@@ -27,7 +27,7 @@ const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promi
 
   if (requestUrl.includes('/pulls/42/comments?per_page=100&page=1')) {
     return jsonResponse([{ id: 1 }], {
-      Link: '<https://api.github.test/repos/example-org/example-repo/pulls/42/comments?per_page=100&page=2>; rel="next"',
+      Link: '<https://api.github.test/repos/gosh/repo/pulls/42/comments?per_page=100&page=2>; rel="next"',
     });
   }
   if (requestUrl.includes('/pulls/42/comments?per_page=100&page=2')) {
@@ -54,7 +54,7 @@ const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promi
       { filename: 'src/example.ts', status: 'modified' },
       { filename: 'src/deleted.ts', status: 'removed' },
     ], {
-      Link: '<https://api.github.test/repos/example-org/example-repo/pulls/42/files?per_page=100&page=2>; rel="next"',
+      Link: '<https://api.github.test/repos/gosh/repo/pulls/42/files?per_page=100&page=2>; rel="next"',
     });
   }
   if (requestUrl.includes('/pulls/42/files?per_page=100&page=2')) {
@@ -86,7 +86,7 @@ const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promi
 };
 
 const client = new GitHubClient({
-  owner: 'example-org',
+  owner: 'gosh',
   repo: 'repo',
   token: 'test-token',
   apiBaseUrl: 'https://api.github.test',

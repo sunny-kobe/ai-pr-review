@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-export const REVIEW_SYSTEM_PROMPT = 'You are the model provider for AI PR Review. Return only valid JSON. Prefer a top-level JSON array of review findings. If the API response format requires an object, return {"findings":[...]}.';
-export const REVIEW_FILTER_SYSTEM_PROMPT = 'You are the review filter provider for AI PR Review. Return only valid JSON. Return a JSON array of decisions shaped as {"index":number,"keep":boolean,"reason":string}.';
+export const REVIEW_SYSTEM_PROMPT = 'You are the model provider for AI PR Review. Return only valid JSON shaped as {"findings":[...]}.';
+export const REVIEW_FILTER_SYSTEM_PROMPT = 'You are the review filter provider for AI PR Review. Return only valid JSON shaped as {"decisions":[{"index":number,"keep":boolean,"reason":string|null}]}.';
 export class OpenAiProvider {
     name = 'openai';
     review(prompt, options) {
@@ -26,7 +26,7 @@ export async function reviewPromptFile(promptFile, options) {
 export async function reviewWithOpenAi(prompt, options) {
     return parseFindings(await completePromptWithOpenAi(prompt, options));
 }
-export async function completePromptWithOpenAi(prompt, options, systemPrompt = REVIEW_SYSTEM_PROMPT) {
+export async function completePromptWithOpenAi(prompt, options, systemPrompt = REVIEW_SYSTEM_PROMPT, structuredOutputKind = 'findings') {
     const apiKey = options.apiKey || '';
     const apiPath = options.apiPath || '/v1/chat/completions';
     const timeoutMs = options.timeoutMs ?? 120000;
@@ -42,7 +42,7 @@ export async function completePromptWithOpenAi(prompt, options, systemPrompt = R
                 authorization: `Bearer ${apiKey}`,
                 'content-type': 'application/json',
             },
-            body: JSON.stringify(buildRequestBody(apiPath, prompt, options, systemPrompt)),
+            body: JSON.stringify(buildRequestBody(apiPath, prompt, options, systemPrompt, structuredOutputKind)),
             signal: controller.signal,
         });
         const responseText = await response.text();
@@ -100,6 +100,9 @@ export function parseFindings(content) {
                 }
                 if (isEmptyReviewResult(parsed)) {
                     return [];
+                }
+                if (['file', 'line', 'severity', 'message'].every((key) => Object.hasOwn(parsed, key))) {
+                    return validateFindings([parsed]);
                 }
             }
         }
@@ -275,7 +278,7 @@ function parseJsonArrayOrObject(content) {
     }
     throw new Error('response did not contain JSON');
 }
-function buildRequestBody(path, promptText, options, systemPrompt = REVIEW_SYSTEM_PROMPT) {
+function buildRequestBody(path, promptText, options, systemPrompt = REVIEW_SYSTEM_PROMPT, structuredOutputKind = 'findings') {
     if (path.endsWith('/responses')) {
         const responsesBody = {
             model: options.model || 'gpt-5.6-luna',
@@ -300,7 +303,7 @@ function buildRequestBody(path, promptText, options, systemPrompt = REVIEW_SYSTE
                 },
             ],
         };
-        const textFormat = buildResponsesTextFormat(options.responseFormat || '');
+        const textFormat = buildResponsesTextFormat(options.responseFormat || '', structuredOutputKind);
         if (textFormat) {
             responsesBody.text = textFormat;
         }
@@ -323,7 +326,7 @@ function buildRequestBody(path, promptText, options, systemPrompt = REVIEW_SYSTE
             },
         ],
     };
-    const responseFormatConfig = buildResponseFormatConfig(options.responseFormat || '');
+    const responseFormatConfig = buildResponseFormatConfig(options.responseFormat || '', structuredOutputKind);
     if (responseFormatConfig) {
         chatBody.response_format = responseFormatConfig;
     }
@@ -422,54 +425,87 @@ function describeJsonValue(value) {
     }
     return typeof value;
 }
-function buildResponseFormatConfig(format) {
+function buildResponseFormatConfig(format, structuredOutputKind) {
     if (format === 'json_object') {
         return { type: 'json_object' };
     }
     if (format === 'json_schema') {
-        return buildJsonSchemaResponseFormat();
+        return buildJsonSchemaResponseFormat(structuredOutputKind);
     }
     return null;
 }
-function buildResponsesTextFormat(format) {
+function buildResponsesTextFormat(format, structuredOutputKind) {
     if (format === 'json_object') {
         return { format: { type: 'json_object' } };
     }
     if (format === 'json_schema') {
         return {
-            format: buildJsonSchemaResponseFormat(),
+            format: {
+                type: 'json_schema',
+                ...buildJsonSchemaDefinition(structuredOutputKind),
+            },
         };
     }
     return null;
 }
-function buildJsonSchemaResponseFormat() {
+function buildJsonSchemaResponseFormat(structuredOutputKind) {
     return {
         type: 'json_schema',
-        json_schema: {
-            name: 'ai_pr_review_findings',
+        json_schema: buildJsonSchemaDefinition(structuredOutputKind),
+    };
+}
+function buildJsonSchemaDefinition(structuredOutputKind) {
+    if (structuredOutputKind === 'review_filter') {
+        return {
+            name: 'ai_pr_review_filter_decisions',
             strict: true,
             schema: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['findings'],
+                required: ['decisions'],
                 properties: {
-                    findings: {
+                    decisions: {
                         type: 'array',
                         items: {
                             type: 'object',
                             additionalProperties: false,
-                            required: ['file', 'line', 'severity', 'message'],
+                            required: ['index', 'keep', 'reason'],
                             properties: {
-                                file: { type: 'string' },
-                                line: { type: 'integer' },
-                                severity: {
-                                    type: 'string',
-                                    enum: ['critical', 'high', 'medium', 'low'],
-                                },
-                                message: { type: 'string' },
-                                suggestion: { type: 'string' },
-                                category: { type: 'string' },
+                                index: { type: 'integer', minimum: 0 },
+                                keep: { type: 'boolean' },
+                                reason: { type: ['string', 'null'] },
                             },
+                        },
+                    },
+                },
+            },
+        };
+    }
+    return {
+        name: 'ai_pr_review_findings',
+        strict: true,
+        schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['findings'],
+            properties: {
+                findings: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['file', 'line', 'severity', 'message', 'suggestion', 'existing_code', 'category'],
+                        properties: {
+                            file: { type: 'string' },
+                            line: { type: 'integer' },
+                            severity: {
+                                type: 'string',
+                                enum: ['critical', 'high', 'medium', 'low'],
+                            },
+                            message: { type: 'string' },
+                            suggestion: { type: ['string', 'null'] },
+                            existing_code: { type: ['string', 'null'] },
+                            category: { type: ['string', 'null'] },
                         },
                     },
                 },

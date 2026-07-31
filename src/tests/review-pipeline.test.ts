@@ -33,8 +33,11 @@ assert.match(basePrompt, /API 调用缺少错误处理/);
 assert.match(basePrompt, /敏感信息泄露/);
 assert.match(basePrompt, /import 顺序/);
 assert.match(basePrompt, /所有输出必须使用中文/);
-assert.match(basePrompt, /标识符/);
+assert.match(basePrompt, /Pixel ID/);
 assert.match(basePrompt, /不要建议回滚到旧值/);
+assert.match(basePrompt, /输出纯 JSON 对象/);
+assert.match(basePrompt, /\{"findings": \[/);
+assert.doesNotMatch(basePrompt, /输出纯 JSON 数组/);
 
 const diffContent = `diff --git a/src/example.ts b/src/example.ts
 --- a/src/example.ts
@@ -47,6 +50,7 @@ const diffContent = `diff --git a/src/example.ts b/src/example.ts
 
 const batchPrompt = buildBatchPrompt({
   basePrompt,
+  changedFiles: ['src/example.ts'],
   files: [
     {
       file: 'src/example.ts',
@@ -55,15 +59,18 @@ const batchPrompt = buildBatchPrompt({
       reviewMode: 'fast',
       reviewerFocus: '重点关注崩溃风险',
       policyRules: 'Security:\n- token 日志泄露',
+      projectRules: 'Use UTC +0 for time ranges.',
     },
   ],
 });
 
-assert.match(batchPrompt, /\*\*本次审查的文件列表\*\*/);
+assert.match(batchPrompt, /\*\*完整 PR 变更文件清单\*\*/);
+assert.match(batchPrompt, /\*\*本批可评论文件及 diff\*\*/);
 assert.match(batchPrompt, /=== src\/example.ts ===/);
 assert.match(batchPrompt, /\[file_strategy\] review_mode=fast/);
 assert.match(batchPrompt, /\[file_focus\] 重点关注崩溃风险/);
 assert.match(batchPrompt, /\[file_policy_rules\]\nSecurity:/);
+assert.match(batchPrompt, /\[file_project_rules\]\nUse UTC \+0 for time ranges/);
 assert.match(batchPrompt, /\[REDACTED_SECRET\]/);
 
 const reviewableLines = collectReviewableLines(diffContent);

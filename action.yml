@@ -40,7 +40,7 @@ inputs:
   openai_response_format:
     description: 'OpenAI response format: empty, json_object, or json_schema'
     required: false
-    default: 'json_object'
+    default: 'json_schema'
 
   openai_reasoning_effort:
     description: 'Optional reasoning effort for Responses-compatible reasoning models, for example low, medium, high'

@@ -6,6 +6,7 @@ import { processFindingsForReview } from './findings/processFindings.js';
 import { filterInlineReviewComments } from './findings/reviewFilter.js';
 import { findSummaryCommentId, buildReviewVerdict, buildSummaryCommentBody } from './output/summary.js';
 import { buildBasePrompt, buildBatchPrompt, countPromptSensitiveMatches } from './prompt/buildPrompt.js';
+import { resolveAgentInstructions } from './prompt/agentInstructions.js';
 export async function runReview(options) {
     const prNumber = Number(options.env.PR_NUMBER || 0);
     if (!prNumber) {
@@ -42,11 +43,12 @@ export async function runReview(options) {
         });
         return { status: 'skipped-draft' };
     }
-    const changedFiles = (await options.github.listPullRequestChangedFiles(prNumber))
+    const allChangedFiles = await options.github.listPullRequestChangedFiles(prNumber);
+    const reviewableFiles = allChangedFiles
         .filter((file) => matchesAny(file, effectiveConfig.scope.fileTypes))
         .filter((file) => !matchesRegex(file, effectiveConfig.scope.excludePatterns))
         .slice(0, effectiveConfig.scope.maxFiles);
-    if (changedFiles.length === 0) {
+    if (reviewableFiles.length === 0) {
         writeOutputs(options.writeOutput, {
             filesReviewed: 0,
             filesSkipped: 0,
@@ -76,7 +78,7 @@ export async function runReview(options) {
     let reviewableLines = [];
     let reviewableAnchors = [];
     const promptFiles = [];
-    for (const file of changedFiles) {
+    for (const file of reviewableFiles) {
         const diff = await options.git.diffForFile(baseSha, prInfo.headSha, file);
         if (!diff) {
             continue;
@@ -95,6 +97,11 @@ export async function runReview(options) {
         const context = options.git.contextForFile
             ? await options.git.contextForFile(file, diff, effectiveConfig.behavior.contextLines)
             : '';
+        const projectRules = await resolveAgentInstructions({
+            baseSha,
+            file,
+            readFileAtRef: options.git.readFileAtRef?.bind(options.git),
+        });
         promptFiles.push({
             file,
             diffContent: diff,
@@ -102,6 +109,7 @@ export async function runReview(options) {
             reviewMode: policy.reviewMode ?? effectiveConfig.strategy.reviewMode,
             reviewerFocus: policy.reviewerFocus ?? effectiveConfig.reviewer.focus,
             policyRules: policyReviewRulesMarkdown(policy.reviewRules),
+            projectRules,
         });
     }
     options.logger(`processed files=${reviewedFiles} skipped=${skippedFiles.length}`);
@@ -129,7 +137,7 @@ export async function runReview(options) {
     });
     const findings = [];
     for (const batch of chunk(promptFiles, effectiveConfig.behavior.batchSize)) {
-        const prompt = buildBatchPrompt({ basePrompt, files: batch });
+        const prompt = buildBatchPrompt({ basePrompt, changedFiles: allChangedFiles, files: batch });
         findings.push(...await options.provider(prompt));
     }
     const processed = processFindingsForReview({

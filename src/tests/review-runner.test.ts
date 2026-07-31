@@ -43,6 +43,25 @@ const workflowDiff = `diff --git a/.github/workflows/ai-review.yml b/.github/wor
    review:
 `;
 
+const liveComponentDiff = `diff --git a/packages/apps/cricketLive/components/Live/index.tsx b/packages/apps/cricketLive/components/Live/index.tsx
+new file mode 100644
+--- /dev/null
++++ b/packages/apps/cricketLive/components/Live/index.tsx
+@@ -0,0 +1,4 @@
++import styles from './index.less';
++export function Live() {
++  return <i className={styles.live} />;
++}
+`;
+
+const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/AccountCard/index.tsx b/packages/apps/cricketLive/components/AccountCard/index.tsx
+--- a/packages/apps/cricketLive/components/AccountCard/index.tsx
++++ b/packages/apps/cricketLive/components/AccountCard/index.tsx
+@@ -1,1 +1,2 @@
+ import styles from './index.less';
++import { Live } from '../Live';
+`;
+
 {
   const outputs: Record<string, string> = {};
   const result = await runReview({
@@ -164,6 +183,53 @@ const workflowDiff = `diff --git a/.github/workflows/ai-review.yml b/.github/wor
 }
 
 {
+  const prompts: string[] = [];
+  const outputs: Record<string, string> = {};
+  await runReview({
+    env: {
+      PR_NUMBER: '1895',
+      DRY_RUN: 'true',
+      FILE_TYPES: '.tsx',
+      GITHUB_OUTPUT: '',
+    },
+    actionRoot: '/tmp/action',
+    config: defaultReviewConfig,
+    github: fakeGithub(
+      { ...basePrInfo, changedFiles: 3 },
+      [],
+      [],
+      [
+        'packages/apps/cricketLive/components/AccountCard/index.tsx',
+        'packages/apps/cricketLive/components/Live/index.less',
+        'packages/apps/cricketLive/components/Live/index.tsx',
+      ],
+    ),
+    git: fakeGit({
+      diffByFile: {
+        'packages/apps/cricketLive/components/AccountCard/index.tsx': accountCardDiff,
+        'packages/apps/cricketLive/components/Live/index.tsx': liveComponentDiff,
+      },
+    }),
+    provider: async (prompt) => {
+      prompts.push(prompt);
+      return [];
+    },
+    writeOutput: (name, value) => {
+      outputs[name] = value;
+    },
+    logger: () => undefined,
+  });
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0] ?? '', /完整 PR 变更文件清单/);
+  assert.match(prompts[0] ?? '', /packages\/apps\/cricketLive\/components\/Live\/index\.less/);
+  assert.match(prompts[0] ?? '', /本批可评论文件及 diff/);
+  assert.match(prompts[0] ?? '', /不能据此推断该文件在仓库中不存在/);
+  assert.doesNotMatch(prompts[0] ?? '', /=== packages\/apps\/cricketLive\/components\/Live\/index\.less ===/);
+  assert.equal(outputs.files_reviewed, '2');
+}
+
+{
   const calls: string[] = [];
   const logs: string[] = [];
   const prompts: string[] = [];
@@ -215,7 +281,7 @@ const workflowDiff = `diff --git a/.github/workflows/ai-review.yml b/.github/wor
       ['src/api/token.ts', 'src/example.ts', 'src/example.test.ts'],
       [
         'fix(price): handle empty price list',
-        `debug token ${'ghp_'}${'1234567890abcdefghijklmnopqrstuvwxyz'}`,
+        'debug token ghp_1234567890abcdefghijklmnopqrstuvwxyz',
       ],
     ),
     git: fakeGit({
@@ -231,7 +297,7 @@ const workflowDiff = `diff --git a/.github/workflows/ai-review.yml b/.github/wor
       prompts.push(prompt);
       return [
         {
-          file: prompt.includes('src/api/token.ts') ? 'src/api/token.ts' : 'src/example.ts',
+          file: prompt.includes('=== src/api/token.ts ===') ? 'src/api/token.ts' : 'src/example.ts',
           line: 2,
           severity: 'high',
           message: '问题',
@@ -297,6 +363,42 @@ const workflowDiff = `diff --git a/.github/workflows/ai-review.yml b/.github/wor
   assert.match(prompts[0] ?? '', /重点关注 GitHub Actions/);
   assert.match(prompts[0] ?? '', /permissions 必须最小化/);
   assert.match(prompts[0] ?? '', /YAML 缩进/);
+}
+
+{
+  const prompts: string[] = [];
+  const agentReads: Array<{ ref: string; file: string }> = [];
+  await runReview({
+    env: {
+      PR_NUMBER: '42',
+      DRY_RUN: 'true',
+      FILE_TYPES: '.ts',
+      GITHUB_OUTPUT: '',
+    },
+    actionRoot: '/tmp/action',
+    config: defaultReviewConfig,
+    github: fakeGithub(basePrInfo, [], [], ['src/example.ts']),
+    git: fakeGit({
+      diffByFile: { 'src/example.ts': diff },
+      filesAtRef: { 'AGENTS.md': 'Project rule: preserve API contracts.' },
+      agentReads,
+    }),
+    provider: async (prompt) => {
+      prompts.push(prompt);
+      return [];
+    },
+    writeOutput: () => undefined,
+    logger: () => undefined,
+  });
+
+  assert.deepEqual(agentReads, [
+    { ref: 'base-sha', file: 'AGENTS.md' },
+    { ref: 'base-sha', file: 'AGENTS.override.md' },
+    { ref: 'base-sha', file: 'src/AGENTS.md' },
+    { ref: 'base-sha', file: 'src/AGENTS.override.md' },
+  ]);
+  assert.match(prompts[0] ?? '', /\[file_project_rules\]/);
+  assert.match(prompts[0] ?? '', /Project rule: preserve API contracts/);
 }
 
 {
@@ -454,6 +556,8 @@ function fakeGit(options: {
   diffByFile: Record<string, string>;
   contextByFile?: Record<string, string>;
   diffCalls?: Array<{ baseSha: string; headSha: string; file: string }>;
+  filesAtRef?: Record<string, string>;
+  agentReads?: Array<{ ref: string; file: string }>;
 }) {
   return {
     fetchAll: async () => undefined,
@@ -463,6 +567,10 @@ function fakeGit(options: {
     diffForFile: async (baseSha: string, headSha: string, file: string) => {
       options.diffCalls?.push({ baseSha, headSha, file });
       return options.diffByFile[file] ?? '';
+    },
+    readFileAtRef: async (ref: string, file: string) => {
+      options.agentReads?.push({ ref, file });
+      return options.filesAtRef?.[file];
     },
     contextForFile: async (file: string, _diffContent: string, _contextLines: number) => options.contextByFile?.[file] ?? '',
   };

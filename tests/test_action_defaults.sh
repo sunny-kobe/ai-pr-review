@@ -35,6 +35,18 @@ default_provider="$(awk '
 ' "$ACTION_FILE")"
 assert_eq "openai" "$default_provider" "action defaults to OpenAI-compatible provider"
 
+default_response_format="$(awk '
+  /^[[:space:]]*openai_response_format:/ { in_input=1; next }
+  in_input && /^[[:space:]]*default:/ {
+    value=$0
+    sub(/^[[:space:]]*default:[[:space:]]*/, "", value)
+    gsub(/^'\''|'\''$/, "", value)
+    print value
+    exit
+  }
+' "$ACTION_FILE")"
+assert_eq "json_schema" "$default_response_format" "action defaults to strict findings schema output"
+
 example_count="$(rg -l 'uses: sunny-kobe/ai-pr-review@v1' "$ROOT_DIR/examples"/*.yml | wc -l | tr -d ' ')"
 assert_eq "4" "$example_count" "all workflow examples use the public action"
 

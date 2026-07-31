@@ -7,10 +7,12 @@ AI PR Review reads the changed lines in a pull request, asks an OpenAI-compatibl
 ## Features
 
 - Reviews only changed files and validates every inline comment against an added line.
+- Includes the complete changed-file manifest as read-only context, without treating non-reviewable files as comment targets.
+- Reads trusted `AGENTS.md` and `AGENTS.override.md` rules from the pull request base commit for the repository root and the reviewed file's nearest directory.
 - Supports OpenAI-compatible Chat Completions and Responses endpoints.
 - Includes frontend, backend, and mobile review presets.
 - Redacts common tokens and secrets before prompts are assembled.
-- Deduplicates findings across reruns with stable fingerprints.
+- Deduplicates findings across reruns with stable fingerprints, including legacy Gosh review markers during migration.
 - Routes comments by severity and configurable per-file/PR budgets.
 - Offers an optional second-pass filter for contradicted findings.
 - Supports `dry_run` for integration testing without GitHub writes.
@@ -56,7 +58,7 @@ OpenAI-compatible APIs are the default:
     openai_base_url: https://api.openai.com
     openai_api_path: /v1/chat/completions
     openai_model: gpt-5.6-luna
-    openai_response_format: json_object
+    openai_response_format: json_schema
 ```
 
 For a compatible Responses endpoint:
@@ -85,6 +87,10 @@ Use `preset: frontend`, `preset: backend`, or `preset: mobile`. For repository-s
 ```
 
 The custom config can override file types, exclusions, reviewer focus, severity threshold, path policies, and review rules. See [Configuration](docs/configuration.md) for the full contract and [examples](examples) for ready-to-copy workflows.
+
+The default `json_schema` response format requires a `{"findings": [...]}`
+object. Leave it unchanged unless the selected provider cannot support schema
+output.
 
 ## Outputs
 

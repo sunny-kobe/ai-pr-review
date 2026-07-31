@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 
 import { parseGeminiCliFindings } from '../providers/geminiCli.js';
-import { parseFindings, parseReviewFilterDecisions } from '../providers/openai.js';
+import {
+  completePromptWithOpenAi,
+  parseFindings,
+  parseReviewFilterDecisions,
+  REVIEW_FILTER_SYSTEM_PROMPT,
+} from '../providers/openai.js';
 
 const noisyGeminiOutput = `Gemini CLI starting review...
 
@@ -51,6 +56,18 @@ assert.deepEqual(
     },
   ],
 );
+assert.deepEqual(
+  parseFindings('{"file":"src/example.ts","line":7,"severity":"high","message":"bad","existing_code":"const value = data.items[0];"}'),
+  [
+    {
+      file: 'src/example.ts',
+      line: 7,
+      severity: 'high',
+      message: 'bad',
+      existing_code: 'const value = data.items[0];',
+    },
+  ],
+);
 assert.deepEqual(parseReviewFilterDecisions('{"decisions":[{"index":0,"keep":false,"reason":"diff disproves it"},{"index":1,"keep":true}]}'), [
   { index: 0, keep: false, reason: 'diff disproves it' },
   { index: 1, keep: true },
@@ -78,6 +95,38 @@ assert.throws(
 assert.throws(
   () => parseFindings('[{"file":"src/example.ts","line":7,"severity":"high"}]'),
   /message must be a non-empty string/,
+);
+
+const originalFetch = globalThis.fetch;
+let filterRequestBody: Record<string, any> = {};
+globalThis.fetch = async (_input, init) => {
+  filterRequestBody = JSON.parse(String(init?.body));
+  return new Response(JSON.stringify({
+    choices: [{ message: { content: '{"decisions":[]}' } }],
+  }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+};
+
+try {
+  await completePromptWithOpenAi('filter prompt', {
+    apiKey: 'test-key',
+    baseUrl: 'https://example.test',
+    apiPath: '/v1/chat/completions',
+    model: 'test-model',
+    responseFormat: 'json_schema',
+  }, REVIEW_FILTER_SYSTEM_PROMPT, 'review_filter');
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+assert.equal(filterRequestBody.response_format?.type, 'json_schema');
+assert.equal(filterRequestBody.response_format?.json_schema?.name, 'ai_pr_review_filter_decisions');
+assert.equal(filterRequestBody.response_format?.json_schema?.strict, true);
+assert.deepEqual(
+  filterRequestBody.response_format?.json_schema?.schema?.properties?.decisions?.items?.required,
+  ['index', 'keep', 'reason'],
 );
 
 console.log('PASS: Provider parsing extracts and validates structured findings');
