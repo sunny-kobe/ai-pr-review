@@ -35,7 +35,7 @@ export function buildStableFindingFingerprint(
 }
 
 export function extractCommentMarkers(body: string, marker: string): string[] {
-  const pattern = new RegExp(`<!-- ai-pr-review:${escapeRegExp(marker)}=([a-f0-9]{64}) -->`, 'g');
+  const pattern = new RegExp(`<!-- (?:ai-pr-review|gosh-review):${escapeRegExp(marker)}=([a-f0-9]{64}) -->`, 'g');
   return Array.from(body.matchAll(pattern), (match) => match[1] ?? '').filter(Boolean).sort();
 }
 

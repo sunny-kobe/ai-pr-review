@@ -54,7 +54,7 @@ ${redactedCommitMessages.length > 0 ? redactedCommitMessages.map((message) => `-
 **不要把以下内容当成问题**:
 - 只是不符合个人偏好的写法，但不会造成 bug、安全风险、数据错误或明显维护成本
 - commit/PR 明确是配置、文案、测试、临时 smoke、日志或样式调整时，顺手指出无关架构建议
-- PR 标题、描述或 commit 明确是更新配置值、标识符或环境变量默认值，且 diff 只是把同一类字面量一致替换为新值时，不要把“新值不同于旧值”本身当成问题；只有发现不一致替换、语法错误、变量读取失效、fallback 逻辑破坏或明确的安全/运行时证据时才评论
+- PR 标题、描述或 commit 明确是更新/替换配置值、埋点 ID、Pixel ID、渠道 ID、App ID、环境变量默认值等，且 diff 只是把同一类字面量一致地替换为新值时，不要把“新值不同于旧值”本身当成问题；只有发现不一致替换、语法错误、变量读取失效、fallback 逻辑破坏或明确的安全/运行时证据时才评论
 - 对历史代码、未改动上下文、已有模式的泛泛改造建议
 - “建议检查”“建议确认”“可能需要考虑”这类没有证据闭环的意见
 
@@ -105,31 +105,36 @@ ${languageInstruction}
 
 ## 📤 输出格式
 
-输出纯 JSON 数组（不要用 Markdown 代码块包裹）:
+输出纯 JSON 对象（不要用 Markdown 代码块包裹）:
 
-[
+{"findings": [
   {
     "file": "src/example.tsx",
     "line": 42,
     "severity": "high",
     "message": "问题描述：清晰说明问题是什么、为什么是问题、如何影响系统",
-    "existing_code": "diff 中被评论的原始新增代码片段（可选，用于行号漂移时定位）",
-    "suggestion": "修复后的参考代码（可选）"
+    "suggestion": "修复后的参考代码（没有则为 null）",
+    "existing_code": "diff 中被评论的原始新增代码片段（没有则为 null）",
+    "category": "问题类别（没有则为 null）"
   }
-]
+]}
 
 **字段说明**:
 - \`file\`: 文件路径（与 diff 中的路径一致）
 - \`line\`: 问题所在的行号（文件中的绝对行号）
 - \`severity\`: 必须是 critical/high/medium/low 之一
 - \`message\`: 问题描述，包含原因和影响
-- \`existing_code\`: （可选）从对应新增行复制的原始代码片段。仅当能精确对应 diff 中的 \`+\` 行时提供
-- \`suggestion\`: （可选）修复后的参考代码。必须只包含你能确定正确的最小片段；不要输出会依赖更大上下文才能正确应用的半截代码块
+- \`existing_code\`: 从对应新增行复制的原始代码片段。无法精确对应 diff 中的 \`+\` 行时输出 \`null\`
+- \`suggestion\`: 修复后的参考代码；没有确定正确的最小修复片段时输出 \`null\`
+- \`category\`: 问题类别；无法确定时输出 \`null\`
 
-**重要**: 如果没有发现任何问题，输出空数组 \`[]\`。
+**重要**: 如果没有发现任何问题，输出 \`{"findings": []}\`。
 `;
 }
 export function buildBatchPrompt(options) {
+    const changedFileManifest = options.changedFiles.length > 0
+        ? options.changedFiles.map((file) => `- ${redactSensitiveContent(file)}`).join('\n')
+        : '- (无)';
     const sections = options.files.map((file) => {
         const pieces = [
             `=== ${file.file} ===`,
@@ -139,13 +144,29 @@ export function buildBatchPrompt(options) {
         if (file.policyRules) {
             pieces.push(`[file_policy_rules]\n${file.policyRules}`);
         }
+        if (file.projectRules) {
+            pieces.push(`[file_project_rules]\n${file.projectRules}`);
+        }
         pieces.push(redactSensitiveContent(file.diffContent));
         if (file.context) {
             pieces.push(redactSensitiveContent(file.context));
         }
         return pieces.join('\n');
     });
-    return `${options.basePrompt}\n\n**本次审查的文件列表**：\n\n${sections.join('\n\n')}`;
+    return `${options.basePrompt}
+
+**完整 PR 变更文件清单**（仅用于理解本次改动范围，清单中的文件不一定可评论）：
+
+${changedFileManifest}
+
+**证据边界**：
+- 未出现在本批可评论 diff 中，只表示该文件未提供给当前批次审查，不能据此推断该文件在仓库中不存在。
+- 未出现在完整 PR 变更文件清单中，只表示该文件未被本 PR 修改，不能据此推断该文件在仓库中不存在。
+- 只能对下方“本批可评论文件及 diff”中的新增行输出 finding；完整 PR 变更文件清单仅作为只读上下文。
+
+**本批可评论文件及 diff**：
+
+${sections.join('\n\n')}`;
 }
 export function countPromptSensitiveMatches(options) {
     return countSensitiveMatches(options.prTitle)

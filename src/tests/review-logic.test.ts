@@ -178,6 +178,20 @@ assert.equal(buildReviewVerdict(1, 0, 0), 'Blocking');
 assert.equal(buildReviewVerdict(0, 1, 0), 'Needs Attention');
 assert.equal(buildReviewVerdict(0, 0, 0), 'LGTM');
 assert.equal(findSummaryCommentId(existingIssueComments), 1203);
+assert.equal(
+  findSummaryCommentId([
+    { id: 1203, body: '<!-- ai-pr-review:summary -->', updated_at: '2026-07-01T00:00:00Z' },
+    { id: 1204, body: '<!-- gosh-review:summary -->', updated_at: '2026-07-02T00:00:00Z' },
+  ]),
+  1204,
+);
+assert.deepEqual(
+  extractCommentMarkers(
+    '<!-- gosh-review:stable-fingerprint=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->',
+    'stable-fingerprint',
+  ),
+  ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
+);
 const summaryBody = buildSummaryCommentBody({
   verdict: 'Needs Attention',
   newFindings: 2,

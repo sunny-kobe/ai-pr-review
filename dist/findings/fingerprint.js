@@ -10,7 +10,7 @@ export function buildStableFindingFingerprint(path, _severity, category, anchor,
     return sha256(`${path}|${category}|${normalizeCodeExcerpt(anchor)}|${normalizedOccurrence}`);
 }
 export function extractCommentMarkers(body, marker) {
-    const pattern = new RegExp(`<!-- ai-pr-review:${escapeRegExp(marker)}=([a-f0-9]{64}) -->`, 'g');
+    const pattern = new RegExp(`<!-- (?:ai-pr-review|gosh-review):${escapeRegExp(marker)}=([a-f0-9]{64}) -->`, 'g');
     return Array.from(body.matchAll(pattern), (match) => match[1] ?? '').filter(Boolean).sort();
 }
 export function extractSeverityFromCommentBody(body) {

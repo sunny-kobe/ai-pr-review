@@ -2,11 +2,13 @@ export function summaryCommentMarker() {
     return '<!-- ai-pr-review:summary -->';
 }
 export function findSummaryCommentId(issueComments) {
-    const marker = summaryCommentMarker();
+    const markers = [summaryCommentMarker(), '<!-- gosh-review:summary -->'];
     return [...issueComments]
         .filter((comment) => {
         const body = comment.body ?? '';
-        return body.includes(marker) || body.includes('## 📋 AI PR Review Summary');
+        return markers.some((marker) => body.includes(marker))
+            || body.includes('## 📋 AI PR Review Summary')
+            || body.includes('## 📋 Gosh AI Review Summary');
     })
         .sort((left, right) => timestamp(left).localeCompare(timestamp(right)))
         .at(-1)?.id;

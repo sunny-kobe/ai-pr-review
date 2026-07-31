@@ -18,6 +18,18 @@ export class ShellGitAdapter {
         const { stdout } = await execFileAsync('git', ['diff', baseSha, headSha, '--', file]);
         return stdout;
     }
+    async readFileAtRef(ref, file) {
+        if (!/^[0-9a-f]{7,64}$/i.test(ref) || !isSafeRepositoryPath(file)) {
+            return undefined;
+        }
+        try {
+            const { stdout } = await execFileAsync('git', ['show', `${ref}:${file}`]);
+            return stdout;
+        }
+        catch {
+            return undefined;
+        }
+    }
     async contextForFile(file, diffContent, contextLines) {
         if (contextLines <= 0) {
             return '';
@@ -39,6 +51,12 @@ export class ShellGitAdapter {
         }
         return `<file_context file="${file}">\n${sections.join('\n')}\n</file_context>`;
     }
+}
+function isSafeRepositoryPath(file) {
+    return !file.startsWith('/')
+        && !file.includes('\0')
+        && !file.includes(':')
+        && file.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
 }
 function parseContextRanges(diffContent, contextLines) {
     const ranges = [];

@@ -20,7 +20,7 @@ Use `${{ secrets.OPENAI_API_KEY }}` or `${{ secrets.GEMINI_API_KEY }}`. Do not p
 | `openai_base_url` | `https://api.openai.com` | Base URL for an OpenAI-compatible endpoint |
 | `openai_model` | `gpt-5.6-luna` | Model identifier accepted by the endpoint |
 | `openai_api_path` | `/v1/chat/completions` | Chat Completions or Responses API path |
-| `openai_response_format` | `json_object` | Empty, `json_object`, or `json_schema` |
+| `openai_response_format` | `json_schema` | Empty, `json_object`, or strict `json_schema` output |
 | `openai_reasoning_effort` | empty | Optional `low`, `medium`, or `high` value for compatible reasoning models |
 
 ## Review Inputs
@@ -44,7 +44,19 @@ Use `${{ secrets.OPENAI_API_KEY }}` or `${{ secrets.GEMINI_API_KEY }}`. Do not p
 | `dry_run` | `false` | Analyze without writing GitHub comments |
 | `debug_mode` | `false` | Enable additional logs |
 
-`preset` is applied first and `config_file` overrides it. Explicit Action inputs are then mapped into the runtime environment.
+`preset` is applied first and `config_file` overrides it. Non-empty Action
+inputs then override the corresponding runtime values, including Action defaults.
+
+## Trusted Repository Rules
+
+For each reviewed file, the action reads `AGENTS.md` and `AGENTS.override.md`
+from the pull request base commit at the repository root and the file's nearest
+directory. It does not read rule files changed by the pull request, preventing
+those changes from becoming prompt instructions. Rules are bounded before they
+are appended to the prompt.
+
+The complete changed-file manifest is also included as read-only context. Inline
+findings remain limited to added lines in reviewable file diffs.
 
 ## Custom Config
 

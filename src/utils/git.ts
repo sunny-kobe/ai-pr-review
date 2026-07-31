@@ -7,6 +7,7 @@ export interface GitAdapter {
   fetchAll(): Promise<void>;
   mergeBase(baseRef: string, headSha: string): Promise<string>;
   diffForFile(baseSha: string, headSha: string, file: string): Promise<string>;
+  readFileAtRef?(ref: string, file: string): Promise<string | undefined>;
   contextForFile?(file: string, diffContent: string, contextLines: number): Promise<string>;
 }
 
@@ -27,6 +28,19 @@ export class ShellGitAdapter implements GitAdapter {
   async diffForFile(baseSha: string, headSha: string, file: string): Promise<string> {
     const { stdout } = await execFileAsync('git', ['diff', baseSha, headSha, '--', file]);
     return stdout;
+  }
+
+  async readFileAtRef(ref: string, file: string): Promise<string | undefined> {
+    if (!/^[0-9a-f]{7,64}$/i.test(ref) || !isSafeRepositoryPath(file)) {
+      return undefined;
+    }
+
+    try {
+      const { stdout } = await execFileAsync('git', ['show', `${ref}:${file}`]);
+      return stdout;
+    } catch {
+      return undefined;
+    }
   }
 
   async contextForFile(file: string, diffContent: string, contextLines: number): Promise<string> {
@@ -54,6 +68,13 @@ export class ShellGitAdapter implements GitAdapter {
 
     return `<file_context file="${file}">\n${sections.join('\n')}\n</file_context>`;
   }
+}
+
+function isSafeRepositoryPath(file: string): boolean {
+  return !file.startsWith('/')
+    && !file.includes('\0')
+    && !file.includes(':')
+    && file.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
 }
 
 interface LineRange {
