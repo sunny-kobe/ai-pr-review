@@ -62,6 +62,20 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
 +import { Live } from '../Live';
 `;
 
+const githubPatch = `@@ -1,1 +1,2 @@
+ const before = 1;
++const value = data.items[0];
+`;
+
+const pollutedLocalDiff = `diff --git a/src/example.ts b/src/example.ts
+--- a/src/example.ts
++++ b/src/example.ts
+@@ -1,2 +1,3 @@
+ const before = 1;
++const historicalBaseChange = true;
++const value = data.items[0];
+`;
+
 {
   const outputs: Record<string, string> = {};
   const result = await runReview({
@@ -115,6 +129,7 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
   const logs: string[] = [];
   const outputs: Record<string, string> = {};
   const diffCalls: Array<{ baseSha: string; headSha: string; file: string }> = [];
+  const mergeBaseCalls: Array<{ baseRef: string; headSha: string }> = [];
   const result = await runReview({
     env: {
       PR_NUMBER: '42',
@@ -128,7 +143,12 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
     actionRoot: '/tmp/action',
     config: defaultReviewConfig,
     github: fakeGithub(basePrInfo, calls, [], ['src/example.ts']),
-    git: fakeGit({ diffByFile: { 'src/example.ts': diff }, diffCalls }),
+    git: fakeGit({
+      diffByFile: { 'src/example.ts': diff },
+      diffCalls,
+      mergeBase: 'merge-base-sha',
+      mergeBaseCalls,
+    }),
     provider: async () => [
       {
         file: 'src/example.ts',
@@ -149,12 +169,13 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
   assert.equal(outputs.issues_found, '1');
   assert.equal(outputs.high_count, '1');
   assert.deepEqual(calls, [
-    'listPullRequestChangedFiles',
+    'listPullRequestFiles',
     'listReviewComments',
     'listIssueComments',
     'listPullRequestCommitMessages',
   ]);
-  assert.deepEqual(diffCalls, [{ baseSha: 'base-sha', headSha: 'head-sha', file: 'src/example.ts' }]);
+  assert.deepEqual(mergeBaseCalls, [{ baseRef: 'main', headSha: 'head-sha' }]);
+  assert.deepEqual(diffCalls, [{ baseSha: 'merge-base-sha', headSha: 'head-sha', file: 'src/example.ts' }]);
   assert.match(logs.join('\n'), /provider=openai/);
   assert.match(logs.join('\n'), /processed files=1 skipped=0/);
   assert.match(logs.join('\n'), /dry_run=true, skipped summary and inline review writes/);
@@ -322,9 +343,9 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
   assert.equal(outputs.issues_found, '2');
   assert.equal(outputs.redacted_matches, '3');
   assert.match(calls.join(','), /listReviewComments,listIssueComments,listPullRequestCommitMessages/);
-  assert.match(calls.join(','), /createSummaryComment,submitInlineReview/);
+  assert.match(calls.join(','), /submitInlineReview,createSummaryComment/);
   assert.match(logs.join('\n'), /summary created/);
-  assert.match(logs.join('\n'), /inline review submitted/);
+  assert.match(logs.join('\n'), /inline review submitted mode=pending-review submitted=1 rejected=0/);
 }
 
 {
@@ -368,6 +389,7 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
 {
   const prompts: string[] = [];
   const agentReads: Array<{ ref: string; file: string }> = [];
+  const contextReads: Array<{ ref: string; file: string }> = [];
   await runReview({
     env: {
       PR_NUMBER: '42',
@@ -382,6 +404,7 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
       diffByFile: { 'src/example.ts': diff },
       filesAtRef: { 'AGENTS.md': 'Project rule: preserve API contracts.' },
       agentReads,
+      contextReads,
     }),
     provider: async (prompt) => {
       prompts.push(prompt);
@@ -399,6 +422,47 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
   ]);
   assert.match(prompts[0] ?? '', /\[file_project_rules\]/);
   assert.match(prompts[0] ?? '', /Project rule: preserve API contracts/);
+  assert.deepEqual(contextReads, [{ ref: 'head-sha', file: 'src/example.ts' }]);
+}
+
+{
+  const calls: string[] = [];
+  const logs: string[] = [];
+  await assert.rejects(
+    () => runReview({
+      env: {
+        PR_NUMBER: '42',
+        FILE_TYPES: '.ts',
+        INLINE_SEVERITY_THRESHOLD: 'high',
+        GITHUB_OUTPUT: '',
+      },
+      actionRoot: '/tmp/action',
+      config: defaultReviewConfig,
+      github: fakeGithub(
+        basePrInfo,
+        calls,
+        [],
+        ['src/example.ts'],
+        [],
+        [],
+        [{ ...basePrInfo, headSha: 'new-head-sha' }],
+      ),
+      git: fakeGit({ diffByFile: { 'src/example.ts': diff } }),
+      provider: async () => [{
+        file: 'src/example.ts',
+        line: 2,
+        severity: 'high',
+        message: '数组访问未做空值检查',
+      }],
+      writeOutput: () => undefined,
+      logger: (message) => logs.push(message),
+    }),
+    /PR head changed during review: expected head-sha, got new-head-sha/,
+  );
+
+  assert.ok(!calls.includes('createSummaryComment'));
+  assert.ok(!calls.includes('submitInlineReview'));
+  assert.match(logs.join('\n'), /processed files=1 skipped=0/);
 }
 
 {
@@ -443,7 +507,7 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
   assert.equal(submittedComments.length, 0);
   assert.match(filterPrompt, /数组访问未做空值检查/);
   assert.match(logs.join('\n'), /review filter completed filtered=1 kept=0/);
-  assert.match(logs.join('\n'), /inline review submitted.*comments=0/);
+  assert.match(logs.join('\n'), /inline review submitted mode=pending-review submitted=0 rejected=0/);
 }
 
 {
@@ -507,7 +571,55 @@ const accountCardDiff = `diff --git a/packages/apps/cricketLive/components/Accou
   });
 
   assert.equal(outputs.files_reviewed, '1');
-  assert.ok(calls.includes('listPullRequestChangedFiles'));
+  assert.ok(calls.includes('listPullRequestFiles'));
+}
+
+{
+  const prompts: string[] = [];
+  const diffCalls: Array<{ baseSha: string; headSha: string; file: string }> = [];
+  const outputs: Record<string, string> = {};
+  await runReview({
+    env: {
+      PR_NUMBER: '42',
+      DRY_RUN: 'true',
+      FILE_TYPES: '.ts',
+      GITHUB_OUTPUT: '',
+    },
+    actionRoot: '/tmp/action',
+    config: defaultReviewConfig,
+    github: fakeGithub(
+      basePrInfo,
+      [],
+      [],
+      ['src/example.ts'],
+      [],
+      [],
+      [],
+      [{ filename: 'src/example.ts', status: 'modified', patch: githubPatch }],
+    ),
+    git: fakeGit({
+      diffByFile: { 'src/example.ts': pollutedLocalDiff },
+      diffCalls,
+    }),
+    provider: async (prompt) => {
+      prompts.push(prompt);
+      return [{
+        file: 'src/example.ts',
+        line: 2,
+        severity: 'high',
+        message: '数组访问未做空值检查',
+      }];
+    },
+    writeOutput: (name, value) => {
+      outputs[name] = value;
+    },
+    logger: () => undefined,
+  });
+
+  assert.equal(diffCalls.length, 0, 'GitHub patch is the PR diff source of truth');
+  assert.match(prompts[0] ?? '', /const value = data\.items\[0\]/);
+  assert.doesNotMatch(prompts[0] ?? '', /historicalBaseChange/);
+  assert.equal(outputs.issues_found, '1');
 }
 
 console.log('PASS: TypeScript review runner covers draft, no-files, dry-run, and provider failure behavior');
@@ -519,12 +631,26 @@ function fakeGithub(
   changedFiles: string[] = [],
   commitMessages: string[] = [],
   submittedComments: Array<{ path: string; line: number; side: 'RIGHT'; body: string }> = [],
+  refreshedPrInfo: PullRequestInfo[] = [],
+  pullRequestFiles: Array<{ filename: string; status: string; patch?: string }> = [],
 ) {
+  let fetchCount = 0;
   return {
-    fetchPullRequestInfo: async () => prInfo,
-    listPullRequestChangedFiles: async () => {
-      calls.push('listPullRequestChangedFiles');
-      return changedFiles;
+    fetchPullRequestInfo: async () => {
+      const result = fetchCount === 0 ? prInfo : refreshedPrInfo[fetchCount - 1] ?? prInfo;
+      fetchCount += 1;
+      return result;
+    },
+    listPullRequestFiles: async () => {
+      calls.push('listPullRequestFiles');
+      return pullRequestFiles.length > 0
+        ? pullRequestFiles.map((file) => ({
+          filename: file.filename,
+          status: file.status,
+          previousFilename: undefined,
+          patch: file.patch,
+        }))
+        : changedFiles.map((filename) => ({ filename, status: 'modified' }));
     },
     listPullRequestCommitMessages: async () => {
       calls.push('listPullRequestCommitMessages');
@@ -558,11 +684,15 @@ function fakeGit(options: {
   diffCalls?: Array<{ baseSha: string; headSha: string; file: string }>;
   filesAtRef?: Record<string, string>;
   agentReads?: Array<{ ref: string; file: string }>;
+  contextReads?: Array<{ ref: string; file: string }>;
+  mergeBase?: string;
+  mergeBaseCalls?: Array<{ baseRef: string; headSha: string }>;
 }) {
   return {
     fetchAll: async () => undefined,
-    mergeBase: async () => {
-      throw new Error('runner should use PR baseSha instead of deriving a merge base from base ref');
+    mergeBase: async (baseRef: string, headSha: string) => {
+      options.mergeBaseCalls?.push({ baseRef, headSha });
+      return options.mergeBase ?? 'merge-base-sha';
     },
     diffForFile: async (baseSha: string, headSha: string, file: string) => {
       options.diffCalls?.push({ baseSha, headSha, file });
@@ -572,6 +702,9 @@ function fakeGit(options: {
       options.agentReads?.push({ ref, file });
       return options.filesAtRef?.[file];
     },
-    contextForFile: async (file: string, _diffContent: string, _contextLines: number) => options.contextByFile?.[file] ?? '',
+    contextForFile: async (ref: string, file: string, _diffContent: string, _contextLines: number) => {
+      options.contextReads?.push({ ref, file });
+      return options.contextByFile?.[file] ?? '';
+    },
   };
 }

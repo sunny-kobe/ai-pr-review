@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 
 import { GitHubClient } from '../github/client.js';
-import { fetchPullRequestInfo, listPullRequestChangedFiles, listPullRequestCommitMessages } from '../github/pr.js';
+import {
+  fetchPullRequestInfo,
+  listPullRequestChangedFiles,
+  listPullRequestCommitMessages,
+  listPullRequestFiles,
+} from '../github/pr.js';
 import { createSummaryComment, listIssueComments, updateSummaryComment } from '../github/comments.js';
 import { submitInlineReview } from '../github/review.js';
 
@@ -14,6 +19,8 @@ interface RecordedRequest {
 
 const requests: RecordedRequest[] = [];
 let pullReviewAttempts = 0;
+let pullCommentAttempts = 0;
+let reviewFailureStatus = 422;
 
 const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
   const requestUrl = String(url);
@@ -51,7 +58,7 @@ const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promi
   }
   if (requestUrl.includes('/pulls/42/files?per_page=100&page=1')) {
     return jsonResponse([
-      { filename: 'src/example.ts', status: 'modified' },
+      { filename: 'src/example.ts', status: 'modified', patch: '@@ -1 +1 @@\n-old\n+new' },
       { filename: 'src/deleted.ts', status: 'removed' },
     ], {
       Link: '<https://api.github.test/repos/gosh/repo/pulls/42/files?per_page=100&page=2>; rel="next"',
@@ -73,12 +80,16 @@ const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promi
   }
   if (requestUrl.endsWith('/pulls/42/reviews')) {
     pullReviewAttempts += 1;
-    if (pullReviewAttempts === 1) {
-      return new Response(JSON.stringify({ message: 'validation failed' }), { status: 422 });
+    if (pullReviewAttempts <= 2) {
+      return new Response(JSON.stringify({ message: 'review failed' }), { status: reviewFailureStatus });
     }
     return jsonResponse({ id: 2001 });
   }
   if (requestUrl.endsWith('/pulls/42/comments')) {
+    pullCommentAttempts += 1;
+    if (pullCommentAttempts === 1) {
+      return new Response(JSON.stringify({ message: 'line is not part of the diff' }), { status: 422 });
+    }
     return jsonResponse({ id: 3001 });
   }
 
@@ -109,6 +120,20 @@ assert.deepEqual(prInfo, {
   changedFiles: 2,
 });
 assert.deepEqual(await listPullRequestChangedFiles(client, 42), ['src/example.ts', 'src/renamed.ts']);
+assert.deepEqual(await listPullRequestFiles(client, 42), [
+  {
+    filename: 'src/example.ts',
+    status: 'modified',
+    previousFilename: undefined,
+    patch: '@@ -1 +1 @@\n-old\n+new',
+  },
+  {
+    filename: 'src/renamed.ts',
+    status: 'renamed',
+    previousFilename: 'src/old-name.ts',
+    patch: undefined,
+  },
+]);
 assert.deepEqual(await listPullRequestCommitMessages(client, 42), [
   'fix(price): handle empty list',
   'test(review): smoke context-aware prompt',
@@ -127,18 +152,43 @@ const reviewResult = await submitInlineReview(client, {
       path: 'src/example.ts',
       line: 2,
       side: 'RIGHT',
-      body: 'inline body',
+      body: 'invalid inline body',
+    },
+    {
+      path: 'src/example.ts',
+      line: 3,
+      side: 'RIGHT',
+      body: 'valid inline body',
     },
   ],
 });
 
 assert.equal(reviewResult.mode, 'fallback');
 assert.equal(reviewResult.submittedComments, 1);
+assert.equal(reviewResult.rejectedComments, 1);
 assert.equal(pullReviewAttempts, 1);
+assert.equal(pullCommentAttempts, 2);
 assert.ok(
   requests.some((request) => request.method === 'POST' && request.url.endsWith('/pulls/42/comments')),
   'fallback posts individual pull request comments',
 );
+
+reviewFailureStatus = 403;
+await assert.rejects(
+  () => submitInlineReview(client, {
+    prNumber: 42,
+    commitSha: 'head-sha',
+    body: '<!-- ai-pr-review:inline-review -->',
+    comments: [{
+      path: 'src/example.ts',
+      line: 2,
+      side: 'RIGHT',
+      body: 'forbidden inline body',
+    }],
+  }),
+  /GitHub API failed: HTTP 403/,
+);
+assert.equal(pullCommentAttempts, 2, 'non-validation errors do not enter per-comment fallback');
 
 console.log('PASS: TypeScript GitHub client modules build correct REST requests and fallback behavior');
 

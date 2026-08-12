@@ -178,9 +178,9 @@ function buildGithubFacade() {
 
   return {
     fetchPullRequestInfo: (prNumber: number) => fetchPullRequestInfo(client, prNumber),
-    listPullRequestChangedFiles: async (prNumber: number) => {
-      const { listPullRequestChangedFiles } = await import('./github/pr.js');
-      return listPullRequestChangedFiles(client, prNumber);
+    listPullRequestFiles: async (prNumber: number) => {
+      const { listPullRequestFiles } = await import('./github/pr.js');
+      return listPullRequestFiles(client, prNumber);
     },
     listPullRequestCommitMessages: async (prNumber: number) => {
       const { listPullRequestCommitMessages } = await import('./github/pr.js');

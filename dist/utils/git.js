@@ -30,7 +30,7 @@ export class ShellGitAdapter {
             return undefined;
         }
     }
-    async contextForFile(file, diffContent, contextLines) {
+    async contextForFile(ref, file, diffContent, contextLines) {
         if (contextLines <= 0) {
             return '';
         }
@@ -40,7 +40,7 @@ export class ShellGitAdapter {
         }
         const sections = [];
         for (const range of ranges) {
-            const lines = await readFileLines(file, range.start, range.end);
+            const lines = await readFileLinesAtRef(ref, file, range.start, range.end);
             if (lines.length === 0) {
                 continue;
             }
@@ -88,11 +88,15 @@ function mergeRanges(ranges) {
     }
     return merged;
 }
-async function readFileLines(file, start, end) {
+async function readFileLinesAtRef(ref, file, start, end) {
+    if (!/^[0-9a-f]{7,64}$/i.test(ref) || !isSafeRepositoryPath(file)) {
+        return [];
+    }
     try {
-        const { stdout } = await execFileAsync('sed', ['-n', `${start},${end}p`, file]);
+        const { stdout } = await execFileAsync('git', ['show', `${ref}:${file}`]);
         return stdout
             .split(/\r?\n/)
+            .slice(start - 1, end)
             .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
             .map((line, index) => `${start + index}\t${line}`);
     }
