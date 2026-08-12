@@ -6,6 +6,7 @@ import { buildExistingStableFingerprints } from './findings/fingerprint.js';
 import { processFindingsForReview } from './findings/processFindings.js';
 import { filterInlineReviewComments, type ReviewFilterDecision } from './findings/reviewFilter.js';
 import type { PullRequestReviewComment } from './github/comments.js';
+import type { PullRequestFile } from './github/pr.js';
 import { findSummaryCommentId, buildReviewVerdict, buildSummaryCommentBody } from './output/summary.js';
 import { buildBasePrompt, buildBatchPrompt, countPromptSensitiveMatches } from './prompt/buildPrompt.js';
 import { resolveAgentInstructions } from './prompt/agentInstructions.js';
@@ -24,7 +25,7 @@ export interface ReviewRunnerGithub {
     isDraft: boolean;
     changedFiles: number;
   }>;
-  listPullRequestChangedFiles(prNumber: number): Promise<string[]>;
+  listPullRequestFiles(prNumber: number): Promise<PullRequestFile[]>;
   listPullRequestCommitMessages(prNumber: number): Promise<string[]>;
   listReviewComments(prNumber: number): Promise<PullRequestReviewComment[]>;
   listIssueComments(prNumber: number): Promise<Array<{ id?: number; body?: string; created_at?: string; updated_at?: string }>>;
@@ -95,7 +96,8 @@ export async function runReview(options: ReviewRunnerOptions): Promise<ReviewRun
     return { status: 'skipped-draft' };
   }
 
-  const allChangedFiles = await options.github.listPullRequestChangedFiles(prNumber);
+  const pullRequestFiles = await options.github.listPullRequestFiles(prNumber);
+  const allChangedFiles = pullRequestFiles.map((file) => file.filename);
   const reviewableFiles = allChangedFiles
     .filter((file) => matchesAny(file, effectiveConfig.scope.fileTypes))
     .filter((file) => !matchesRegex(file, effectiveConfig.scope.excludePatterns))
@@ -119,10 +121,11 @@ export async function runReview(options: ReviewRunnerOptions): Promise<ReviewRun
   const existingIssueComments = await options.github.listIssueComments(prNumber);
   const commitMessages = await options.github.listPullRequestCommitMessages(prNumber);
   const summaryCommentId = findSummaryCommentId(existingIssueComments);
-  const baseSha = prInfo.baseSha || await options.git.mergeBase(
+  const diffBaseSha = await options.git.mergeBase(
     prInfo.baseRef || options.env.GITHUB_BASE_REF || 'main',
     prInfo.headSha,
   );
+  const rulesBaseSha = prInfo.baseSha || diffBaseSha;
   const basePrompt = buildBasePrompt({
     config: effectiveConfig,
     language: options.env.LANGUAGE ?? 'zh-CN',
@@ -138,7 +141,10 @@ export async function runReview(options: ReviewRunnerOptions): Promise<ReviewRun
   const promptFiles = [];
 
   for (const file of reviewableFiles) {
-    const diff = await options.git.diffForFile(baseSha, prInfo.headSha, file);
+    const pullRequestFile = pullRequestFiles.find((entry) => entry.filename === file);
+    const diff = pullRequestFile?.patch
+      ? buildPullRequestFileDiff(pullRequestFile)
+      : await options.git.diffForFile(diffBaseSha, prInfo.headSha, file);
     if (!diff) {
       continue;
     }
@@ -154,10 +160,10 @@ export async function runReview(options: ReviewRunnerOptions): Promise<ReviewRun
     reviewableAnchors = reviewableAnchors.concat(fileReviewableAnchors);
     const policy = resolvePathPolicy(file, effectiveConfig.strategy.pathPolicies);
     const context = options.git.contextForFile
-      ? await options.git.contextForFile(file, diff, effectiveConfig.behavior.contextLines)
+      ? await options.git.contextForFile(prInfo.headSha, file, diff, effectiveConfig.behavior.contextLines)
       : '';
     const projectRules = await resolveAgentInstructions({
-      baseSha,
+      baseSha: rulesBaseSha,
       file,
       readFileAtRef: options.git.readFileAtRef?.bind(options.git),
     });
@@ -240,12 +246,9 @@ export async function runReview(options: ReviewRunnerOptions): Promise<ReviewRun
   });
 
   if (!dryRun) {
-    if (summaryCommentId) {
-      await options.github.updateSummaryComment(summaryCommentId, summaryBody);
-      options.logger('summary updated');
-    } else {
-      await options.github.createSummaryComment(prNumber, summaryBody);
-      options.logger('summary created');
+    const refreshedPrInfo = await options.github.fetchPullRequestInfo(prNumber);
+    if (refreshedPrInfo.headSha !== prInfo.headSha) {
+      throw new Error(`PR head changed during review: expected ${prInfo.headSha}, got ${refreshedPrInfo.headSha}`);
     }
     const inlineReviewResult = await options.github.submitInlineReview({
       prNumber,
@@ -253,7 +256,18 @@ export async function runReview(options: ReviewRunnerOptions): Promise<ReviewRun
       body: '<!-- ai-pr-review:inline-review -->',
       comments: reviewComments,
     });
-    options.logger(`inline review submitted mode=${inlineReviewMode(inlineReviewResult)} comments=${reviewComments.length}`);
+    options.logger(
+      `inline review submitted mode=${inlineReviewMode(inlineReviewResult)}`
+      + ` submitted=${inlineReviewCount(inlineReviewResult, 'submittedComments')}`
+      + ` rejected=${inlineReviewCount(inlineReviewResult, 'rejectedComments')}`,
+    );
+    if (summaryCommentId) {
+      await options.github.updateSummaryComment(summaryCommentId, summaryBody);
+      options.logger('summary updated');
+    } else {
+      await options.github.createSummaryComment(prNumber, summaryBody);
+      options.logger('summary created');
+    }
   } else {
     options.logger('dry_run=true, skipped summary and inline review writes');
   }
@@ -280,6 +294,27 @@ function inlineReviewMode(result: unknown): string {
     }
   }
   return 'unknown';
+}
+
+function inlineReviewCount(result: unknown, key: 'submittedComments' | 'rejectedComments'): number {
+  if (typeof result === 'object' && result && key in result) {
+    const value = (result as Record<string, unknown>)[key];
+    if (typeof value === 'number') {
+      return value;
+    }
+  }
+  return 0;
+}
+
+function buildPullRequestFileDiff(file: PullRequestFile): string {
+  const previousPath = file.previousFilename ?? file.filename;
+  const oldPath = file.status === 'added' ? '/dev/null' : `a/${previousPath}`;
+  return [
+    `diff --git a/${previousPath} b/${file.filename}`,
+    `--- ${oldPath}`,
+    `+++ b/${file.filename}`,
+    file.patch ?? '',
+  ].join('\n');
 }
 
 function writeOutputs(

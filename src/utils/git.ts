@@ -8,7 +8,7 @@ export interface GitAdapter {
   mergeBase(baseRef: string, headSha: string): Promise<string>;
   diffForFile(baseSha: string, headSha: string, file: string): Promise<string>;
   readFileAtRef?(ref: string, file: string): Promise<string | undefined>;
-  contextForFile?(file: string, diffContent: string, contextLines: number): Promise<string>;
+  contextForFile?(ref: string, file: string, diffContent: string, contextLines: number): Promise<string>;
 }
 
 export class ShellGitAdapter implements GitAdapter {
@@ -43,7 +43,7 @@ export class ShellGitAdapter implements GitAdapter {
     }
   }
 
-  async contextForFile(file: string, diffContent: string, contextLines: number): Promise<string> {
+  async contextForFile(ref: string, file: string, diffContent: string, contextLines: number): Promise<string> {
     if (contextLines <= 0) {
       return '';
     }
@@ -55,7 +55,7 @@ export class ShellGitAdapter implements GitAdapter {
 
     const sections = [];
     for (const range of ranges) {
-      const lines = await readFileLines(file, range.start, range.end);
+      const lines = await readFileLinesAtRef(ref, file, range.start, range.end);
       if (lines.length === 0) {
         continue;
       }
@@ -113,11 +113,16 @@ function mergeRanges(ranges: LineRange[]): LineRange[] {
   return merged;
 }
 
-async function readFileLines(file: string, start: number, end: number): Promise<string[]> {
+async function readFileLinesAtRef(ref: string, file: string, start: number, end: number): Promise<string[]> {
+  if (!/^[0-9a-f]{7,64}$/i.test(ref) || !isSafeRepositoryPath(file)) {
+    return [];
+  }
+
   try {
-    const { stdout } = await execFileAsync('sed', ['-n', `${start},${end}p`, file]);
+    const { stdout } = await execFileAsync('git', ['show', `${ref}:${file}`]);
     return stdout
       .split(/\r?\n/)
+      .slice(start - 1, end)
       .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
       .map((line, index) => `${start + index}\t${line}`);
   } catch {

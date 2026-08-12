@@ -26,9 +26,18 @@ interface PullRequestPayload {
   changed_files?: number;
 }
 
+export interface PullRequestFile {
+  filename: string;
+  status: string;
+  previousFilename?: string;
+  patch?: string;
+}
+
 interface PullRequestFilePayload {
   filename?: string;
   status?: string;
+  previous_filename?: string;
+  patch?: string;
 }
 
 interface PullRequestCommitPayload {
@@ -53,14 +62,22 @@ export async function fetchPullRequestInfo(client: GitHubClient, prNumber: numbe
 }
 
 export async function listPullRequestChangedFiles(client: GitHubClient, prNumber: number): Promise<string[]> {
+  return (await listPullRequestFiles(client, prNumber)).map((file) => file.filename);
+}
+
+export async function listPullRequestFiles(client: GitHubClient, prNumber: number): Promise<PullRequestFile[]> {
   const files = await client.paginate<PullRequestFilePayload>(
     `/repos/{owner}/{repo}/pulls/${prNumber}/files?per_page=100`,
   );
 
   return files
     .filter((file) => file.status !== 'removed')
-    .map((file) => file.filename ?? '')
-    .filter(Boolean);
+    .flatMap((file) => file.filename ? [{
+      filename: file.filename,
+      status: file.status ?? 'modified',
+      previousFilename: file.previous_filename,
+      patch: file.patch,
+    }] : []);
 }
 
 export async function listPullRequestCommitMessages(client: GitHubClient, prNumber: number): Promise<string[]> {

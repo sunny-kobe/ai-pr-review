@@ -43,7 +43,8 @@ export async function runReview(options) {
         });
         return { status: 'skipped-draft' };
     }
-    const allChangedFiles = await options.github.listPullRequestChangedFiles(prNumber);
+    const pullRequestFiles = await options.github.listPullRequestFiles(prNumber);
+    const allChangedFiles = pullRequestFiles.map((file) => file.filename);
     const reviewableFiles = allChangedFiles
         .filter((file) => matchesAny(file, effectiveConfig.scope.fileTypes))
         .filter((file) => !matchesRegex(file, effectiveConfig.scope.excludePatterns))
@@ -65,7 +66,8 @@ export async function runReview(options) {
     const existingIssueComments = await options.github.listIssueComments(prNumber);
     const commitMessages = await options.github.listPullRequestCommitMessages(prNumber);
     const summaryCommentId = findSummaryCommentId(existingIssueComments);
-    const baseSha = prInfo.baseSha || await options.git.mergeBase(prInfo.baseRef || options.env.GITHUB_BASE_REF || 'main', prInfo.headSha);
+    const diffBaseSha = await options.git.mergeBase(prInfo.baseRef || options.env.GITHUB_BASE_REF || 'main', prInfo.headSha);
+    const rulesBaseSha = prInfo.baseSha || diffBaseSha;
     const basePrompt = buildBasePrompt({
         config: effectiveConfig,
         language: options.env.LANGUAGE ?? 'zh-CN',
@@ -79,7 +81,10 @@ export async function runReview(options) {
     let reviewableAnchors = [];
     const promptFiles = [];
     for (const file of reviewableFiles) {
-        const diff = await options.git.diffForFile(baseSha, prInfo.headSha, file);
+        const pullRequestFile = pullRequestFiles.find((entry) => entry.filename === file);
+        const diff = pullRequestFile?.patch
+            ? buildPullRequestFileDiff(pullRequestFile)
+            : await options.git.diffForFile(diffBaseSha, prInfo.headSha, file);
         if (!diff) {
             continue;
         }
@@ -95,10 +100,10 @@ export async function runReview(options) {
         reviewableAnchors = reviewableAnchors.concat(fileReviewableAnchors);
         const policy = resolvePathPolicy(file, effectiveConfig.strategy.pathPolicies);
         const context = options.git.contextForFile
-            ? await options.git.contextForFile(file, diff, effectiveConfig.behavior.contextLines)
+            ? await options.git.contextForFile(prInfo.headSha, file, diff, effectiveConfig.behavior.contextLines)
             : '';
         const projectRules = await resolveAgentInstructions({
-            baseSha,
+            baseSha: rulesBaseSha,
             file,
             readFileAtRef: options.git.readFileAtRef?.bind(options.git),
         });
@@ -178,6 +183,19 @@ export async function runReview(options) {
         otherFindingsCount: Math.max(processed.issues.length - 5, 0),
     });
     if (!dryRun) {
+        const refreshedPrInfo = await options.github.fetchPullRequestInfo(prNumber);
+        if (refreshedPrInfo.headSha !== prInfo.headSha) {
+            throw new Error(`PR head changed during review: expected ${prInfo.headSha}, got ${refreshedPrInfo.headSha}`);
+        }
+        const inlineReviewResult = await options.github.submitInlineReview({
+            prNumber,
+            commitSha: prInfo.headSha,
+            body: '<!-- ai-pr-review:inline-review -->',
+            comments: reviewComments,
+        });
+        options.logger(`inline review submitted mode=${inlineReviewMode(inlineReviewResult)}`
+            + ` submitted=${inlineReviewCount(inlineReviewResult, 'submittedComments')}`
+            + ` rejected=${inlineReviewCount(inlineReviewResult, 'rejectedComments')}`);
         if (summaryCommentId) {
             await options.github.updateSummaryComment(summaryCommentId, summaryBody);
             options.logger('summary updated');
@@ -186,13 +204,6 @@ export async function runReview(options) {
             await options.github.createSummaryComment(prNumber, summaryBody);
             options.logger('summary created');
         }
-        const inlineReviewResult = await options.github.submitInlineReview({
-            prNumber,
-            commitSha: prInfo.headSha,
-            body: '<!-- ai-pr-review:inline-review -->',
-            comments: reviewComments,
-        });
-        options.logger(`inline review submitted mode=${inlineReviewMode(inlineReviewResult)} comments=${reviewComments.length}`);
     }
     else {
         options.logger('dry_run=true, skipped summary and inline review writes');
@@ -217,6 +228,25 @@ function inlineReviewMode(result) {
         }
     }
     return 'unknown';
+}
+function inlineReviewCount(result, key) {
+    if (typeof result === 'object' && result && key in result) {
+        const value = result[key];
+        if (typeof value === 'number') {
+            return value;
+        }
+    }
+    return 0;
+}
+function buildPullRequestFileDiff(file) {
+    const previousPath = file.previousFilename ?? file.filename;
+    const oldPath = file.status === 'added' ? '/dev/null' : `a/${previousPath}`;
+    return [
+        `diff --git a/${previousPath} b/${file.filename}`,
+        `--- ${oldPath}`,
+        `+++ b/${file.filename}`,
+        file.patch ?? '',
+    ].join('\n');
 }
 function writeOutputs(writeOutput, values) {
     writeOutput('files_reviewed', String(values.filesReviewed));
