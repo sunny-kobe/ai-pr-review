@@ -19,7 +19,7 @@
     "test": "npm run build && node --check dist/index.js && node --check dist/openai-provider.js && npm run build:test && node .tmp-test-dist/tests/agentInstructions.test.js && node .tmp-test-dist/tests/review-logic.test.js && node .tmp-test-dist/tests/review-pipeline.test.js && node .tmp-test-dist/tests/provider-parsing.test.js && node .tmp-test-dist/tests/github-client.test.js && node .tmp-test-dist/tests/review-runner.test.js"
   },
   "devDependencies": {
-    "@types/node": "^22.15.29",
+    "@types/node": "^26.6.3",
     "typescript": "^5.8.3"
   }
 }
